@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Drawpad</title>
+<style>
+  :root {
+    --bar-bg: #f2f2f0;
+    --bar-fg: #1a1a1a;
+    --bar-line: #cfcfca;
+    --active-bg: #1a1a1a;
+    --active-fg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bar-bg: #2a2a2a;
+      --bar-fg: #f0f0f0;
+      --bar-line: #444;
+      --active-bg: #f0f0f0;
+      --active-fg: #1a1a1a;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    overscroll-behavior: none;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  #app { display: flex; flex-direction: column; height: 100%; }
+  #stage { position: relative; flex: 1; min-height: 0; }
+  #pad {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    background: transparent;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  #bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: var(--bar-bg);
+    color: var(--bar-fg);
+    border-top: 1px solid var(--bar-line);
+  }
+  button {
+    font: inherit; font-size: 14px;
+    color: var(--bar-fg);
+    background: transparent;
+    border: 1px solid var(--bar-line);
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 40px;
+    cursor: pointer;
+  }
+  button[aria-pressed="true"] {
+    background: var(--active-bg);
+    color: var(--active-fg);
+    border-color: var(--active-bg);
+  }
+  button:focus-visible, input:focus-visible { outline: 2px solid #2a6df4; outline-offset: 2px; }
+  #size-wrap { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+  #size { flex: 1; min-width: 60px; accent-color: var(--active-bg); }
+  #preview {
+    width: 36px; height: 40px; flex: none;
+    display: grid; place-items: center;
+  }
+  #dot { border-radius: 50%; background: #000; }
+  @media (prefers-color-scheme: dark) {
+    #dot { outline: 1px solid #888; }
+  }
+  body.erasing #dot { background: transparent; outline: 1px dashed var(--bar-fg); }
+  #tools { display: flex; gap: 6px; }
+  #bar { flex-wrap: wrap; gap: 6px; }
+  button.icon {
+    width: 40px; height: 40px; min-height: 0; padding: 0;
+    display: grid; place-items: center; flex: none;
+  }
+  button.icon svg {
+    width: 22px; height: 22px; fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  }
+  button.primary { background: var(--active-bg); color: var(--active-fg); border-color: var(--active-bg); }
+  #sheet {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.55); padding: 16px;
+  }
+  #sheet[hidden] { display: none; }
+  #sheet-card {
+    background: var(--bar-bg); color: var(--bar-fg);
+    border-radius: 14px; padding: 14px;
+    width: min(420px, 100%); max-height: 100%;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #sheet-img-wrap {
+    flex: 1; min-height: 0; overflow: auto;
+    border-radius: 8px;
+    background-color: #fff;
+    background-image: linear-gradient(45deg, #ddd 25%, transparent 25%, transparent 75%, #ddd 75%),
+                      linear-gradient(45deg, #ddd 25%, transparent 25%, transparent 75%, #ddd 75%);
+    background-size: 16px 16px; background-position: 0 0, 8px 8px;
+  }
+  #sheet-img { display: block; width: 100%; height: auto; -webkit-touch-callout: default; }
+  #sheet-hint { margin: 0; font-size: 13px; }
+  #sheet-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  #sheet-actions a { text-decoration: none; }
+  @media (max-width: 420px) {
+    #bar { padding-left: 8px; padding-right: 8px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage"><canvas id="pad"></canvas></div>
+  <div id="bar">
+    <div id="tools" role="group" aria-label="Tools">
+      <button id="marker" class="icon" aria-pressed="true" aria-label="Marker" title="Marker"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+      <button id="eraser" class="icon" aria-pressed="false" aria-label="Eraser" title="Eraser"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg></button>
+    </div>
+    <div id="size-wrap">
+      <input id="size" type="range" min="1" max="60" value="6" aria-label="Brush size">
+      <div id="preview"><div id="dot"></div></div>
+    </div>
+    <button id="undo" class="icon" aria-label="Undo" title="Undo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+    <button id="clear" class="icon" aria-label="Clear" title="Clear"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></button>
+    <button id="save" class="icon primary" aria-label="Share drawing" title="Share drawing"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/></svg></button>
+  </div>
+</div>
+
+<div id="sheet" hidden>
+  <div id="sheet-card" role="dialog" aria-label="Your drawing">
+    <div id="sheet-img-wrap"><img id="sheet-img" alt="Your drawing"></div>
+    <p id="sheet-hint">Press and hold the image to save or share it.</p>
+    <div id="sheet-actions">
+      <a id="sheet-dl" download="drawing.png"><button type="button" class="icon" aria-label="Download" title="Download"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg></button></a>
+      <button id="sheet-close" type="button" class="icon" aria-label="Close" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var canvas = document.getElementById('pad');
+  var ctx = canvas.getContext('2d');
+  var stage = document.getElementById('stage');
+  var sizeInput = document.getElementById('size');
+  var dot = document.getElementById('dot');
+  var btnMarker = document.getElementById('marker');
+  var btnEraser = document.getElementById('eraser');
+  var btnUndo = document.getElementById('undo');
+  var btnClear = document.getElementById('clear');
+
+  var erasing = false;
+  var drawing = false;
+  var last = null;
+  var undoStack = [];
+  var MAX_UNDO = 20;
+
+  function dpr() { return window.devicePixelRatio || 1; }
+
+  function resize() {
+    var w = stage.clientWidth, h = stage.clientHeight;
+    if (!w || !h) return;
+    var ratio = dpr();
+    var newW = Math.round(w * ratio), newH = Math.round(h * ratio);
+    if (canvas.width === newW && canvas.height === newH) return;
+
+    // keep existing drawing when the view resizes
+    var keep = document.createElement('canvas');
+    keep.width = canvas.width; keep.height = canvas.height;
+    if (canvas.width && canvas.height) keep.getContext('2d').drawImage(canvas, 0, 0);
+
+    canvas.width = newW; canvas.height = newH;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (keep.width && keep.height) ctx.drawImage(keep, 0, 0);
+    undoStack = []; // snapshots no longer match the canvas size
+    updateUndo();
+  }
+
+  function setupStroke() {
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Number(sizeInput.value) * dpr();
+    ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
+    ctx.strokeStyle = '#000000';
+    ctx.fillStyle = '#000000';
+  }
+
+  function pos(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * dpr(), y: (e.clientY - r.top) * dpr() };
+  }
+
+  function snapshot() {
+    try {
+      undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+      if (undoStack.length > MAX_UNDO) undoStack.shift();
+    } catch (err) {}
+    updateUndo();
+  }
+
+  function updateUndo() { btnUndo.disabled = undoStack.length === 0; btnUndo.style.opacity = undoStack.length ? 1 : 0.4; }
+
+  function start(e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    snapshot();
+    drawing = true;
+    last = pos(e);
+    setupStroke();
+    // a single tap leaves a dot
+    ctx.beginPath();
+    ctx.arc(last.x, last.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function move(e) {
+    if (!drawing) return;
+    e.preventDefault();
+    var events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    if (!events.length) events = [e];
+    setupStroke();
+    for (var i = 0; i < events.length; i++) {
+      var p = pos(events[i]);
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      last = p;
+    }
+  }
+
+  function end(e) {
+    if (!drawing) return;
+    drawing = false;
+    last = null;
+    try { canvas.releasePointerCapture(e.pointerId); } catch (err) {}
+  }
+
+  canvas.addEventListener('pointerdown', start);
+  canvas.addEventListener('pointermove', move);
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  function setTool(isEraser) {
+    erasing = isEraser;
+    btnMarker.setAttribute('aria-pressed', String(!isEraser));
+    btnEraser.setAttribute('aria-pressed', String(isEraser));
+    document.body.classList.toggle('erasing', isEraser);
+  }
+  btnMarker.addEventListener('click', function () { setTool(false); });
+  btnEraser.addEventListener('click', function () { setTool(true); });
+
+  function updateDot() {
+    var s = Math.min(Number(sizeInput.value), 34);
+    dot.style.width = s + 'px';
+    dot.style.height = s + 'px';
+  }
+  sizeInput.addEventListener('input', updateDot);
+
+  btnUndo.addEventListener('click', function () {
+    var img = undoStack.pop();
+    if (img) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.putImageData(img, 0, 0);
+    }
+    updateUndo();
+  });
+
+  btnClear.addEventListener('click', function () {
+    snapshot();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  });
+
+  // ---- Save PNG: native share sheet, with download / long-press fallback ----
+  var btnSave = document.getElementById('save');
+  var sheet = document.getElementById('sheet');
+  var sheetImg = document.getElementById('sheet-img');
+  var sheetDl = document.getElementById('sheet-dl');
+  var sheetUrl = null;
+
+  function closeSheet() {
+    sheet.hidden = true;
+    sheetImg.removeAttribute('src');
+    if (sheetUrl) { URL.revokeObjectURL(sheetUrl); sheetUrl = null; }
+  }
+  document.getElementById('sheet-close').addEventListener('click', closeSheet);
+  sheet.addEventListener('click', function (e) { if (e.target === sheet) closeSheet(); });
+
+  function showFallback(blob) {
+    if (sheetUrl) URL.revokeObjectURL(sheetUrl);
+    sheetUrl = URL.createObjectURL(blob);
+    sheetImg.src = sheetUrl;
+    sheetDl.href = sheetUrl;
+    sheet.hidden = false;
+  }
+
+  btnSave.addEventListener('click', function () {
+    canvas.toBlob(function (blob) {
+      if (!blob) return;
+      var file;
+      try { file = new File([blob], 'drawing.png', { type: 'image/png' }); } catch (err) { file = null; }
+
+      if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: 'My drawing' }).catch(function (err) {
+          if (err && err.name !== 'AbortError') showFallback(blob);
+        });
+      } else {
+        showFallback(blob);
+      }
+    }, 'image/png');
+  });
+
+  window.addEventListener('resize', resize);
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+
+  updateDot();
+  updateUndo();
+  resize();
+})();
+</script>
+</body>
+</html>
