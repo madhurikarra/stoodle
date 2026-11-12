@@ -391,9 +391,16 @@
     persist();
   };
 
-  /* ---------- Save (drawing only, transparent PNG, no background) ---------- */
+  /* ---------- Save / share (drawing on a flat white background, no background image) ---------- */
   $('save').onclick = () => {
-    pad.toBlob(async blob => {
+    const out = document.createElement('canvas');
+    out.width = pad.width;
+    out.height = pad.height;
+    const octx = out.getContext('2d');
+    octx.fillStyle = '#ffffff';
+    octx.fillRect(0, 0, out.width, out.height);
+    octx.drawImage(pad, 0, 0);
+    out.toBlob(async blob => {
       if (!blob) return;
       const file = new File([blob], 'drawing.png', { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
